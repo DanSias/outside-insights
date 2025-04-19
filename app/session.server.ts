@@ -34,12 +34,15 @@ export async function getUserId(
 
 export async function getUser(request: Request) {
   const userId = await getUserId(request);
-  if (userId === undefined) return null;
+  if (!userId) return null;
 
   const user = await getUserById(userId);
-  if (user) return user;
+  if (!user) {
+    await logout(request);
+    return null;
+  }
 
-  throw await logout(request);
+  return user;
 }
 
 export async function requireUserId(
@@ -56,11 +59,13 @@ export async function requireUserId(
 
 export async function requireUser(request: Request) {
   const userId = await requireUserId(request);
-
   const user = await getUserById(userId);
-  if (user) return user;
 
-  throw await logout(request);
+  if (!user) {
+    throw await logout(request);
+  }
+
+  return user;
 }
 
 export async function createUserSession({

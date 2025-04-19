@@ -1,5 +1,5 @@
 datasource db {
-  provider = "sqlite"
+  provider = "postgres"
   url      = env("DATABASE_URL")
 }
 
@@ -7,26 +7,53 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// OAuth-compatible User model
 model User {
-  id    String @id @default(cuid())
-  email String @unique
-
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String
+  image     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  accounts Account[]
+  teams    TeamMember[]
+  prompts  Prompt[]
+  projects Project[]
+  sessions ConversationSession[]
+  settings UserSetting[]
   password Password?
   notes    Note[]
 }
 
-model Password {
-  hash String
+// OAuth account linking (for use with Auth.js or NextAuth)
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  provider          String
+  providerAccountId String
+  access_token      String?
+  refresh_token     String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
 
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+// User password-based authentication
+model Password {
+  id     String @id @default(uuid())
+  hash   String
+  user   User   @relation(fields: [userId], references: [id])
   userId String @unique
 }
 
 model Note {
-  id    String @id @default(cuid())
+  id    String @id @default(uuid())
   title String
   body  String
 
@@ -35,4 +62,137 @@ model Note {
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
+}
+
+// User Preferences (key-value)
+model UserSetting {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  key       String
+  value     String
+  type      String // e.g., "string", "boolean", "json", etc.
+  category  String? // optional grouping (e.g., "appearance", "ai")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, key])
+}
+
+// Teams - User Collaboration
+model Team {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  description String?
+  logoUrl     String?
+  isPersonal  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  members  TeamMember[]
+  projects Project[]
+}
+
+model TeamMember {
+  id        String   @id @default(uuid())
+  team      Team     @relation(fields: [teamId], references: [id])
+  teamId    String
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  role      Role     @default(MEMBER)
+  createdAt DateTime @default(now())
+
+  @@unique([teamId, userId])
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  PENDING // For users who request to join and await approval
+}
+
+// Projects tied to a Team and optionally a User (creator)
+model Project {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  creator   User   @relation(fields: [creatorId], references: [id])
+  creatorId String
+
+  team   Team   @relation(fields: [teamId], references: [id])
+  teamId String
+
+  settings ProjectSettings?
+  prompts  Prompt[]
+  sessions ConversationSession[]
+}
+
+// Custom project settings (e.g., tech stack, tone)
+model ProjectSettings {
+  id        String  @id @default(uuid())
+  project   Project @relation(fields: [projectId], references: [id])
+  projectId String  @unique
+
+  techStack   String[]
+  tone        String?
+  styleGuide  String?
+  model       String? // e.g., default LLM for the project
+  temperature Float? // optional override for generation
+}
+
+// Prompt Types (reusable templates)
+model PromptType {
+  id              String   @id @default(uuid())
+  slug            String   @unique
+  title           String
+  description     String?
+  category        String?
+  estimatedTime   String?
+  difficultyLevel String?
+  fields          Json // Structured form fields
+  template        String // Final template with placeholders
+  examplePrompt   String?
+  createdAt       DateTime @default(now())
+
+  prompts Prompt[]
+}
+
+// Prompts created by users within a project
+model Prompt {
+  id            String   @id @default(uuid())
+  title         String
+  content       String // Final compiled prompt
+  input         Json // User-submitted field values
+  configuration Json? // Instructions, extra guidance, metadata
+  model         String? // LLM used for generation
+  temperature   Float? // Optional generation param
+  status        String? // e.g., "draft", "published"
+  createdAt     DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  project   Project @relation(fields: [projectId], references: [id])
+  projectId String
+
+  type   PromptType? @relation(fields: [typeId], references: [id])
+  typeId String?
+}
+
+// Conversations with LLMs
+model ConversationSession {
+  id        String   @id @default(uuid())
+  title     String
+  model     String
+  messages  Json
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  project   Project @relation(fields: [projectId], references: [id])
+  projectId String
 }
